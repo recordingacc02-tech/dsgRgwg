@@ -112,7 +112,7 @@ CREATE OR REPLACE VIEW v_course_revenue AS
  LEFT JOIN payments p  ON p.enrollment_id = e.id
  GROUP BY c.id, c.name, c.subject, t.name;
 
-Create OR REPLACE VIEW v_teacher_summary AS
+CREATE OR REPLACE VIEW v_teacher_summary AS
  SELECT t.id, t.name, t.subject,
         COUNT(c.id) AS courses_taught,
         COALESCE(SUM(p.amount),0) AS total_earned
