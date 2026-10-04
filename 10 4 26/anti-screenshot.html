@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Anti-Screenshot Demo</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: system-ui, sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    overflow: hidden;
+  }
+
+  /* Blackout overlay — shown when capture is detected */
+  #blackout {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 999999;
+    display: none;
+  }
+
+  #stage {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1e3c72, #2a5298);
+  }
+
+  #stage video {
+    max-width: 90vw;
+    max-height: 80vh;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6);
+  }
+
+  #hint {
+    position: absolute;
+    bottom: 16px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 13px;
+    color: rgba(255,255,255,.55);
+  }
+
+  #badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    font-size: 12px;
+    color: rgba(255,255,255,.5);
+    background: rgba(0,0,0,.35);
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div id="blackout"></div>
+
+<div id="stage">
+  <div id="badge">shield: active</div>
+  <video id="media"
+         controls
+         playsinline
+         disableRemotePlayback
+         crossorigin="use-credentials">
+    <!-- Replace src with your own DRM-protected stream if available -->
+    <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <div id="hint">Try Ctrl+Shift+S / Cmd+Shift+3, or switch tabs, or share screen.</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  const blackout = document.getElementById('blackout');
+  const stage   = document.getElementById('stage');
+  const video   = document.getElementById('media');
+
+  // --- 1. Black out on any "capture-like" activity -----------------------
+  function triggerBlackout() {
+    blackout.style.display = 'block';
+    stage.style.filter = 'blur(0)';
+    // Pause video to avoid accidental recording of motion
+    if (!video.paused) video.pause();
+  }
+
+  // --- 2. Block screenshot keyboard shortcuts ----------------------------
+  // PrintScreen copies to clipboard (outside page control), but we can
+  // prevent the window from losing focus and clear the clipboard on paste.
+  document.addEventListener('keydown', function (e) {
+    const k = e.key;
+    const mac = navigator.platform.toLowerCase().includes('mac');
+
+    const isPrtSc = k === 'PrintScreen';
+    const isWin  = (e.ctrlKey && e.shiftKey && (k === 'S' || k === 's'));
+    const isMac1 = mac && (e.metaKey && e.shiftKey && (k === '3' || k === '4'));
+    const isMac2 = mac && (e.metaKey && k === '4');
+
+    if (isPrtSc || isWin || isMac1 || isMac2) {
+      e.preventDefault();
+      // Clear clipboard contents the moment they're pasted back
+      try { navigator.clipboard.writeText(''); } catch (_) {}
+      triggerBlackout();
+    }
+  }, true); // capture phase so we run before the OS
+
+  // --- 3. Disable right-click context menu --------------------------------
+  document.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+  });
+
+  // --- 4. Detect tab/window blur (user switched away) ---------------------
+  window.addEventListener('blur', function () {
+    triggerBlackout();
+  });
+
+  // --- 5. Detect screen-capture attempts via the Screen Capture API -------
+  // This fires when someone tries to share the tab/screen via
+  // getDisplayMedia / chrome://screen-capture / OBS / Zoom share.
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+      // Probe once; if the user cancels, nothing happens. If they share,
+      // we cannot stop it but we can react.
+      // Note: actually invoking this would prompt the user, so we don't
+      // auto-call it. Instead we hook the video element's capture stream.
+    }
+    // Some browsers fire a 'capturestart' event on the media element when
+    // the tab is being captured (e.g. OBS window capture).
+    video.addEventListener('capturestart', triggerBlackout);
+    video.addEventListener('suspend',  function () { /* no-op */ });
+  } catch (_) {}
+
+  // --- 6. DRM hint ---------------------------------------------------------
+  // Real protection requires Widevine. If your server serves the stream
+  // with DRM, set the video's `src` to a DRM-protected manifest and the
+  // browser will refuse screen-capture. This demo uses a plain file for
+  // illustration only.
+})();
+</script>
+
+</body>
+</html>

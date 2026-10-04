@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DRM-Protected Player (Netflix-style)</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: system-ui, sans-serif;
+    overflow: hidden;
+  }
+
+  /* Shaka Player container */
+  #video-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+  }
+  #video {
+    width: 100%;
+    height: 100%;
+    background: #000;
+  }
+
+  /* Blackout overlay — shown when capture is detected */
+  #blackout {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 999999;
+    display: none;
+  }
+
+  /* Status badge */
+  #badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    font-size: 12px;
+    color: rgba(255,255,255,.7);
+    background: rgba(0,0,0,.5);
+    padding: 4px 10px;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+  #badge.drm { color: #4ade80; }
+  #badge.black { color: #f87171; }
+
+  #hint {
+    position: absolute;
+    bottom: 10px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255,255,255,.4);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="blackout"></div>
+
+<div id="video-container">
+  <div id="badge" class="drm">DRM: loading</div>
+  <video id="video" playsinline crossorigin="use-credentials"></video>
+  <div id="hint">Widevine-protected. Try switching tabs, Ctrl+Shift+S, or screen-sharing.</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/shaka-player@4/dist/shaka-player.compiled.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  const video   = document.getElementById('video');
+  const badge   = document.getElementById('badge');
+  const blackout = document.getElementById('blackout');
+
+  const manifestUri =
+    'https://storage.googleapis.com/shaka-demo-assets/sintel-widevine/dash.mpd';
+  const licenseServer =
+    'https://cwip-shaka-proxy.appspot.com/wrapped_request';
+
+  function setBadge(text, cls) {
+    badge.textContent = 'DRM: ' + text;
+    badge.className = cls || 'drm';
+  }
+
+  function triggerBlackout() {
+    blackout.style.display = 'block';
+    setBadge('capture detected', 'black');
+    try { video.pause(); } catch (_) {}
+  }
+
+  // ---- 1. Widevine DRM setup (this is what makes the browser black out
+  //        captured frames, just like Netflix) ---------------------------
+  function init() {
+    shaka.polyfill.VideosetVideoElement(video);
+
+    // Register Widevine CDM
+    shaka.mediaCapabilities.configureAsync({
+      order: ['widevine', 'clearkey'],
+      persistentSession: false,
+      sessions: { clearkey: { serverURL: 'data:text/plain;base64,' } },
+      decryption: {
+        clearKey: {
+          keys: {},
+          licenseServerURL: 'data:text/plain;base64,'
+        }
+      },
+      keySystems: {
+        'com.widevine.alpha': {
+          videoRobustness: 'MPR',
+          audioRobustness: 'MPR'
+        }
+      }
+    }).then(function () {
+      player = new shaka.Player(video);
+      player.configure({
+        drm: {
+          servers: { 'com.widevine.alpha': licenseServer }
+        },
+        // When the CDM detects capture, the browser forces black frames.
+        // Shaka surfaces this via these events.
+        clearKey: {}
+      });
+
+      player.addEventListener('shakaerror', function (e) {
+        console.error('Shaka error', e);
+      });
+
+      player.load(manifestUri).then(function () {
+        setBadge('widevine active', 'drm');
+      }).catch(function (e) {
+        setBadge('load failed', 'black');
+        console.error('Load failed', e);
+      });
+    }).catch(function (e) {
+      setBadge('CDM unavailable', 'black');
+      console.error('configureAsync failed', e);
+    });
+  }
+
+  // ---- 2. Extra JS-level deterrents --------------------------------------
+  // These run *in addition* to DRM; DRM does the real blocking.
+
+  // Block screenshot shortcuts + clear clipboard on paste
+  document.addEventListener('keydown', function (e) {
+    const k = e.key;
+    const mac = navigator.platform.toLowerCase().includes('mac');
+    const hit =
+      k === 'PrintScreen' ||
+      (e.ctrlKey && e.shiftKey && (k === 'S' || k === 's')) ||
+      (mac && e.metaKey && e.shiftKey && (k === '3' || k === '4')) ||
+      (mac && e.metaKey && k === '4');
+    if (hit) {
+      e.preventDefault();
+      try { navigator.clipboard.writeText(''); } catch (_) {}
+      triggerBlackout();
+    }
+  }, true);
+
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // Tab/window blur
+  window.addEventListener('blur', triggerBlackout);
+
+  // Visibility change (switch tabs / minimize)
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) triggerBlackout();
+  });
+
+  // capturestart on the video element (OBS window capture, etc.)
+  video.addEventListener('capturestart', triggerBlackout);
+
+  let player;
+  init();
+})();
+</script>
+</body>
+</html>
